@@ -1,0 +1,203 @@
+---
+title: "NYPD Shooting Incident"
+author: "Jaeryang Baek"
+date: "6/15/2021"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Before starting
+
+### About data
+
+In advance to starting any of the data analysis, It is required to download the `NYPD Shooting Incident Data` beforehand. You can download the data set by visiting the website <https://catalog.data.gov/dataset> and searching the term 'NYPD Shooting Incident Data (Historic)'. Make sure to have the csv file in the same folder as the Rmd file. I've renamed the csv file to `NYPD_Shooting_Incident_Data.csv` after downloading the file for the sake of convenience.
+
+From 2006 to the end of the previous calendar year, every gunshot occurrence in New York City was documented in the data.
+
+### Areas of Focus
+
+* When is the safest time to travel the city for a visitor?
+* When is the safest/most dangerous season?
+* Which boroughs should you avoid?
+* Any correlation between the Incident count with the Murder count?
+
+
+## Importing libraries
+
+Importing commonly used R libraries such as `tidyverse`, `lubridate.`
+
+``` {r import_library, echo = FALSE}
+library(tidyverse)
+library(lubridate)
+```
+## Importing data
+
+Importing the downloaded data from the local directory `./NYPD_Shooting_Incident_Data.csv`
+
+``` {r import_data}
+file_dir <- "./NYPD_Shooting_Incident_Data.csv"
+
+incidents <- read_csv(file_dir)
+```
+
+or we could import the data from accessing the url directly from online
+
+```{r import_data_url}
+incidents <- read_csv("https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD")
+
+```
+
+## Tidy & Transform data
+
+Tidying up and Transforming the data by removing the columns not necessary, as well as removing the rows with the missing data and filtering the data so that the obvious errors can be omitted as well. 
+
+After getting rid of the missing data, We change the format (variable types) of the columns such as date and time so that it's easier for us to manipulate the data for analysis and to work with in general.
+
+``` {r tidy_incident_data}
+incidents <- incidents %>% 
+  select(c(OCCUR_DATE,OCCUR_TIME, BORO, STATISTICAL_MURDER_FLAG)) 
+
+incidents <- incidents[complete.cases(incidents),] 
+  
+incidents <- mutate(incidents, OCCUR_DATE = mdy(OCCUR_DATE)) %>% 
+  mutate(DATETIME = ymd_hms(str_c(OCCUR_DATE, OCCUR_TIME))) %>% 
+  mutate(MURDER = STATISTICAL_MURDER_FLAG) %>% 
+  select(-c(OCCUR_DATE, OCCUR_TIME, STATISTICAL_MURDER_FLAG))
+
+summary(incidents)
+
+incidents_by_boro <- incidents %>% 
+  group_by(BORO) %>% count()
+
+incidents_by_boro_hour_dist <- incidents %>% 
+  mutate(TIME = hour(round_date(DATETIME, "hour"))) %>% 
+  select(c(BORO, TIME)) %>% table() %>% 
+  as.data.frame()
+
+incidents_by_boro_month_dist <- incidents %>% 
+  mutate(MONTH = month(round_date(DATETIME, "month"))) %>% 
+  select(c(BORO, MONTH)) %>% table() %>% 
+  as.data.frame()
+
+all_incidents_by_year <- incidents %>% 
+  mutate(YEAR = year(round_date(DATETIME, "year"))) %>% 
+  group_by(YEAR) %>% count()
+
+colnames(all_incidents_by_year) <- c("YEAR", "INCIDENTS")
+
+all_murders_by_year <- incidents %>% 
+  filter(MURDER == TRUE) %>% 
+  mutate(YEAR = year(round_date(DATETIME, "year"))) %>% 
+  group_by(YEAR) %>% count()
+
+colnames(all_murders_by_year) <- c("YEAR", "MURDERS")
+
+
+by_year <- merge(all_incidents_by_year,all_murders_by_year,by="YEAR")
+
+```
+
+## Analysis with Visualizations
+
+With the data obtained previously, We will do an analysis on when and where statistically is the most safest Boroughs in New York to travel.
+
+For visualizations, we will utilize the data transformed above and give an additional analysis on the data as well.
+
+
+### Total shooting incidents by Boroughs?
+First, we will take a look and visualize the data regarding the total occurrence of the shooting incidents classified by Boroughs.
+
+```{r visualisation_total_by_boro}
+
+incidents_by_boro %>%
+  ggplot(aes(BORO,n))+
+  geom_col(aes(fill = BORO)) +
+  coord_flip() +
+  labs(title="Total Shooting Incidents by Boroughs",
+        y="# of incidents", x= "Borough")+
+  geom_text(aes(label = round(n, 1)), nudge_y= -3, color="black")
+
+```
+
+As you can observe from the plot above, `BROOKLYN` has the highest total shooting incidents and `STATEN ISLAND` has the lowest. From the data, we can deduce that if someone were to get into a shooting incident its most likely that the incident will occur in either `BROOKLYN` or `BRONX`. Therefore, I would suggest travelers to avoid those boroughs if possible, and if not, be on the lookout for any dangers.
+
+
+### Total hourly shooting incidents by Boroughs?
+Next up, we will take a look and create the bar plot regarding the total hourly occurrence of the shooting incidents classified by Boroughs.
+
+For this specific visualization, we will choose the borough `QUEENS` to inspect further. Also, Feel free to change the variable `borough` to suit your needs.
+
+```{r visualisation_hour_boro}
+borough <- "QUEENS"
+
+incidents_by_boro_hour_dist %>% filter(BORO == borough) %>% 
+  ggplot(aes(TIME,Freq))+
+  geom_col() +
+  labs(title=str_c("Hourly Total Incident Freq in ",borough),
+        y="# of incidents", x= "hour")
+```
+
+As you can see the incident occurrence spikes up during the night/early morning (0h - 4h) and drastically settles down during the morning/noon (6h - 12h). From this bar chart, we can infer that if a traveler were to avoid any danger, it would be wise to advise them to do not go around and minimize the movement in the borough during the night(0h - 4h) and try to visit places during the day(6h - 14h).
+
+
+### Total monthly shooting incidents of All Boroughs?
+Last but not least, we will take a look and plot a line chart on the total monthly occurrence of the shooting incidents classified of All Boroughs at once.
+
+```{r visualisation_month_all}
+incidents_by_boro_month_dist %>% 
+  ggplot(mapping = aes(x = MONTH, y = Freq)) + 
+  geom_line(aes(group = BORO)) + 
+  geom_point(aes(color = BORO))
+
+```
+
+As you can see from the line chart, when it comes to `STATEN ISLAND`, `QUEENS`, and `MANHATTAN` the incident rate stays pretty much the same throughout the year as oppose to `BRONX` and `BROOKLYN` peaking during the summer. 
+
+Why the incidents peaks during the summer is yet to be known because of the lack of data from the source.
+
+From the visualization, we can conclude that its wise to be more cautious during the summer if in `BRONX` and `BROOKLYN`.
+
+
+### Modeling data
+
+We model the data and explore the linear correlation between the `MURDERS` count with the `INCIDENTs` count by using function `lm()`.
+
+``` {r modeling_data}
+mod <- lm(INCIDENTS ~ MURDERS, data = by_year)
+
+summary(mod)
+
+by_year %>% slice_min(INCIDENTS)
+by_year %>% slice_max(INCIDENTS)
+
+
+by_year_w_pred <- by_year %>% 
+  mutate(pred = predict(mod))
+
+
+by_year_w_pred %>% ggplot() + 
+  geom_point(aes(x = MURDERS, y = INCIDENTS), color = "blue") +
+  geom_point(aes(x = MURDERS, y = pred), color = "red")
+```
+
+From the plot above, we can clearly identify the linear correlation.
+
+## Conclusion & Identifying Bias
+
+In conclusion, if you know any friends and families whom are planning on travelling to New York in the near future, make sure to let them know that 
+
+* It can be particularly dangerous during the night.
+* Be more cautious during the summer in `BRONX` and `BROOKLYN`.
+* Avoid `BROOKLYN` or `BRONX` if possible.
+
+As I do not have any personal bias against any boroughs in New York, I doubt there's been any skewed analysis for that specific reason. But the data that's been used for this analysis has not been adjusted to the total population (is not per capita) nor to the area size of the borough, which are crucial factors when it comes to understanding the whole picture. Because of this reason, we cannot be 100% certain that `BROOKLYN` or `BRONX` is the most dangerous part of the town statistically.
+
+### Session Info
+```{r session_info}
+sessionInfo()
+```
